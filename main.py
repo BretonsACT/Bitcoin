@@ -1,195 +1,205 @@
-import streamlit as st
+import numpy as np
 import pandas as pd
+import yfinance as yf
+import matplotlib.pyplot as plt
+import streamlit as st
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, roc_curve, roc_auc_score
 
-def get_recommendation(risk, horizon, goal, knowledge, decentralization):
-    """
-    Analyzes user input to provide an investment recommendation.
-    """
-    etf_score = 0
-    btc_score = 0
+# ---------------------------
+# Streamlit App
+# ---------------------------
+st.title("📈 Bitcoin Tomorrow Predictor")
+st.write("Logistic Regression models on Bitcoin data (3 years).")
 
-    # --- Scoring Logic ---
-
-    # 1. Risk Tolerance
-    if risk == "Low (Protect my capital)":
-        etf_score += 3
-    elif risk == "Medium (Balanced growth and safety)":
-        etf_score += 2
-        btc_score += 1
-    elif risk == "High (Aggressive growth is the priority)":
-        etf_score += 1
-        btc_score += 2
-    elif risk == "Very High (Willing to take significant risks for maximal returns)":
-        btc_score += 3
-
-    # 2. Investment Horizon
-    if horizon <= 3: # Short term
-        btc_score += 2
-    elif 3 < horizon <= 10: # Medium term
-        etf_score += 1
-        btc_score += 1
-    else: # Long term
-        etf_score += 2
-
-    # 3. Primary Goal
-    if goal == "Wealth Preservation":
-        etf_score += 3
-    elif goal == "Steady, Compounded Growth":
-        etf_score += 2
-    elif goal == "Aggressive Growth":
-        btc_score += 2
-        etf_score += 1
-    elif goal == "High-Risk Speculation":
-        btc_score += 3
-
-    # 4. Technical Knowledge / Management Style
-    if knowledge == "I want a simple, hands-off investment.":
-        etf_score += 2
-    else:
-        btc_score += 2
-
-    # 5. View on Decentralization
-    if decentralization == "I prefer regulated, traditional financial systems.":
-        etf_score += 2
-    elif decentralization == "It's interesting, but not a primary factor.":
-        etf_score += 1
-        btc_score += 1
-    else:
-        btc_score += 2
-
-    # --- Generate Recommendation ---
-    if etf_score > btc_score + 3:
-        return (
-            "Strongly Leans: ETF",
-            "Your profile indicates a strong preference for stability, long-term growth, and regulated markets. "
-            "A diversified ETF, such as one tracking a broad market index like the S&P 500, aligns very well with your goals. "
-            "It offers a hands-off approach to investing with lower volatility compared to single assets.",
-            "success"
-        )
-    elif btc_score > etf_score + 3:
-        return (
-            "Strongly Leans: Bitcoin",
-            "Your profile suggests a high tolerance for risk and a focus on aggressive, potentially speculative growth. "
-            "You value direct asset control and are comfortable with the technical aspects of digital assets. "
-            "Directly holding Bitcoin aligns with your appetite for high returns and acceptance of volatility.",
-            "success"
-        )
-    elif etf_score > btc_score:
-        return (
-            "Leans: ETF",
-            "Your profile leans towards a preference for safety and diversification. While you might be open to some risk, "
-            "the structured and diversified nature of an ETF seems to be a better fit for your primary goals. "
-            "You could consider a smaller allocation to higher-risk assets if you wish, but the core of your strategy points towards ETFs.",
-            "info"
-        )
-    elif btc_score > etf_score:
-        return (
-            "Leans: Bitcoin",
-            "Your profile shows an interest in higher growth potential and you're not afraid of taking on risk. "
-            "While you appreciate some traditional aspects, your goals align more with the high-growth nature of Bitcoin. "
-            "Ensure you fully understand the volatility and security responsibilities before investing.",
-            "info"
-        )
-    else:
-        return (
-            "Balanced View: Consider Both",
-            "Your profile is well-balanced between seeking growth and managing risk. A hybrid approach could be suitable for you. "
-            "This might involve a core holding in diversified ETFs for stability, complemented by a smaller, speculative position in Bitcoin "
-            "to capture potential upside. This allows you to have a solid foundation while still participating in a high-growth asset class.",
-            "warning"
-        )
+# Step 1: Data Collection
+spy = yf.Ticker("SPY")
+# data = spy.history(period="3y")
+data = yf.download("BTC-USD", period="3y")
 
 
-def display_market_indicators():
-    """
-    Displays fictional market indicators for educational purposes.
-    """
-    st.subheader("Simulated Market Indicators")
-    st.markdown(
-        "These are *for demonstration only* and do not represent live market data. They illustrate the types of indicators you might look at."
-    )
+# data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Dividends', 'Stock Splits']
+dataset = data[['Open', 'High', 'Low', 'Close', 'Volume']]
 
-    col1, col2 = st.columns(2)
+# Step 2: Feature Engineering
+dataset['short_mavg'] = dataset['Close'].rolling(window=10, min_periods=1).mean()
+dataset['long_mavg'] = dataset['Close'].rolling(window=60, min_periods=1).mean()
 
-    with col1:
-        st.markdown("#### 📊 Broad Market ETF (e.g., S&P 500)")
-        # --- ETF Indicators ---
-        st.metric(label="Market Trend (50/200 Day MA)", value="Bullish", delta="Golden Cross")
-        st.metric(label="Relative Strength Index (RSI)", value="62 (Neutral)", delta="0.5")
-        st.metric(label="Volatility Index (VIX)", value="17.5 (Low)", delta="-1.2", delta_color="inverse")
+# Target variables
+dataset['Sign_1'] = np.where(dataset['short_mavg'] > dataset['long_mavg'], 1.0, 0.0)
+dataset['Sign_1'] = dataset['Sign_1'].shift(-10)
+dataset['Sign_2'] = (np.sign(np.log(dataset['Close'] / dataset['Close'].shift(1))) > 0).astype(int)
+dataset['Sign_2'] = dataset['Sign_2'].shift(-1)
 
+# Additional features
+dataset['O-C'] = dataset['Close'] - dataset['Open']
+dataset['H-L'] = dataset['High'] - dataset['Low']
+dataset['Log_Return'] = np.log(dataset['Close'] / dataset['Close'].shift(1))
+dataset['Momentum'] = dataset['Close'].diff(1)
+dataset['SMA_5'] = dataset['Close'].rolling(window=5).mean()
+dataset['SMA_10'] = dataset['Close'].rolling(window=10).mean()
+dataset['SMA_20'] = dataset['Close'].rolling(window=20).mean()
+dataset['SMA_50'] = dataset['Close'].rolling(window=50).mean()
+dataset['SMA_100'] = dataset['Close'].rolling(window=100).mean()
+dataset['EMA_5'] = dataset['Close'].ewm(span=5, adjust=False).mean()
+dataset['EMA_10'] = dataset['Close'].ewm(span=10, adjust=False).mean()
+dataset['EMA_20'] = dataset['Close'].ewm(span=20, adjust=False).mean()
+dataset['EMA_50'] = dataset['Close'].ewm(span=50, adjust=False).mean()
+dataset['EMA_100'] = dataset['Close'].ewm(span=100, adjust=False).mean()
 
-    with col2:
-        st.markdown("#### ₿ Bitcoin")
-        # --- Bitcoin Indicators ---
-        st.metric(label="Market Trend (MACD)", value="Bearish", delta="Negative Crossover", delta_color="inverse")
-        st.metric(label="Relative Strength Index (RSI)", value="45 (Neutral)", delta="-2.1")
-        st.metric(label="On-Chain Sentiment (Hash Rate)", value="Strong", delta="All-Time High")
+# RSI
+delta = dataset['Close'].diff(1)
+gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+rs = gain / loss
+dataset['RSI'] = 100 - (100 / (1 + rs))
 
+dataset.dropna(inplace=True)
 
-# --- Streamlit App Layout ---
+# Step 3: Train / Validation Split
+validation_size = 0.2
+split_index = int(len(dataset) * (1 - validation_size))
+train_df = dataset.iloc[:split_index]
+validation_df = dataset.iloc[split_index:]
 
-st.set_page_config(layout="wide", page_title="Investment Decision Helper")
+features = [
+    'O-C', 'H-L', 'Log_Return', 'Momentum',
+    'SMA_5', 'SMA_10', 'SMA_20', 'SMA_50', 'SMA_100',
+    'EMA_5', 'EMA_10', 'EMA_20', 'EMA_50', 'EMA_100',
+    'RSI'
+]
 
-st.title("Investment Helper: ETF or Bitcoin?")
-st.markdown(
-    "This tool helps you analyze your investment profile to see which asset might be a better fit for you. "
-    "Answer the questions in the sidebar to get your personalized feedback."
-)
-st.markdown("---")
+X_train = train_df[features]
+Y_train_1 = train_df['Sign_1']
+Y_train_2 = train_df['Sign_2']
 
+X_validation = validation_df[features]
+Y_validation_1 = validation_df['Sign_1']
+Y_validation_2 = validation_df['Sign_2']
 
-# --- Sidebar for User Input ---
-st.sidebar.header("Your Investor Profile")
+# Scale
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_validation_scaled = scaler.transform(X_validation)
 
-risk_tolerance = st.sidebar.selectbox(
-    "1. What is your risk tolerance?",
-    ("Low (Protect my capital)", "Medium (Balanced growth and safety)", "High (Aggressive growth is the priority)", "Very High (Willing to take significant risks for maximal returns)")
-)
+# Step 4: Train Models
+model1 = LogisticRegression(solver='liblinear')
+model1.fit(X_train_scaled, Y_train_1)
 
-investment_horizon = st.sidebar.slider(
-    "2. What is your investment time horizon (in years)?",
-    min_value=1, max_value=30, value=10, step=1
-)
+model2 = LogisticRegression(solver='liblinear')
+model2.fit(X_train_scaled, Y_train_2)
 
-investment_goal = st.sidebar.radio(
-    "3. What is your primary investment goal?",
-    ("Wealth Preservation", "Steady, Compounded Growth", "Aggressive Growth", "High-Risk Speculation")
-)
+# Step 5: Validation Scores
+predictions1 = model1.predict(X_validation_scaled)
+predictions2 = model2.predict(X_validation_scaled)
 
-technical_knowledge = st.sidebar.radio(
-    "4. How involved do you want to be?",
-    ("I want a simple, hands-off investment.", "I'm willing to learn and manage my own digital assets.")
-)
+acc1 = accuracy_score(Y_validation_1, predictions1)
+acc2 = accuracy_score(Y_validation_2, predictions2)
 
-decentralization_view = st.sidebar.radio(
-    "5. What's your view on decentralization vs. regulation?",
-    ("I prefer regulated, traditional financial systems.", "It's interesting, but not a primary factor.", "Decentralization and self-custody are important to me.")
-)
+st.subheader("📊 Model Accuracy")
+st.write(f"Model 1 (MA crossover): **{acc1:.2%}**")
+st.write(f"Model 2 (Daily returns): **{acc2:.2%}**")
 
+# Step 6: Predict Tomorrow
+latest_features = dataset[features].iloc[-1:].copy()
+latest_scaled = scaler.transform(latest_features)
 
-# --- Main Panel for Results ---
+# Predictions & probabilities
+tomorrow_pred1 = model1.predict(latest_scaled)[0]
+tomorrow_prob1 = model1.predict_proba(latest_scaled)[0][1]
 
-# Get and display recommendation
-recommendation, explanation, alert_type = get_recommendation(
-    risk_tolerance, investment_horizon, investment_goal, technical_knowledge, decentralization_view
-)
+tomorrow_pred2 = model2.predict(latest_scaled)[0]
+tomorrow_prob2 = model2.predict_proba(latest_scaled)[0][1]
 
-st.header("Your Personalized Recommendation")
+signal_map = {0: "DOWN", 1: "UP"}
 
-if alert_type == "success":
-    st.success(f"**{recommendation}**")
-elif alert_type == "info":
-    st.info(f"**{recommendation}**")
+st.subheader("🔮 Tomorrow's Prediction")
+st.write(f"Model 1 (MA Crossover): **{signal_map[tomorrow_pred1]}** (prob={tomorrow_prob1:.2f})")
+st.write(f"Model 2 (Daily Returns): **{signal_map[tomorrow_pred2]}** (prob={tomorrow_prob2:.2f})")
+
+# Step 7: Consensus Signal
+votes = [tomorrow_pred1, tomorrow_pred2]
+vote_sum = sum(votes)
+
+if vote_sum == 2:
+    final_signal = "UP ✅"
+elif vote_sum == 0:
+    final_signal = "DOWN ⬇️"
 else:
-    st.warning(f"**{recommendation}**")
+    final_signal = "NEUTRAL ⚖️"
 
-st.write(explanation)
+st.subheader("📌 Final Consensus Signal")
+st.write(f"**{final_signal}**")
 
-st.markdown("---")
+# Step 8: Validation Backtest Chart with Signals
+st.subheader("📉 SPY Backtest with Signals")
 
-# Display market indicators
-display_market_indicators()
+# Consensus for validation
+consensus = []
+for p1, p2 in zip(predictions1, predictions2):
+    if p1 + p2 == 2:
+        consensus.append(1)
+    elif p1 + p2 == 0:
+        consensus.append(0)
+    else:
+        consensus.append(np.nan)  # Neutral
 
-st.markdown("---")
-st.warning("**Disclaimer:** This is a tool for educational purposes only and does not constitute financial advice. Always do your own research and consult with a qualified financial advisor before making any investment decisions.")
+validation_df = validation_df.copy()
+validation_df['Consensus'] = consensus
+validation_df['Market Returns'] = validation_df['Close'].pct_change()
+validation_df['Strategy Returns'] = validation_df['Market Returns'] * validation_df['Consensus'].shift(1)
+
+# Plot signals on price
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(validation_df.index, validation_df['Close'], label='SPY Close', color='blue')
+
+ax.scatter(validation_df.index[validation_df['Consensus'] == 1],
+           validation_df['Close'][validation_df['Consensus'] == 1],
+           marker='^', color='green', label='Buy Signal', alpha=0.8)
+
+ax.scatter(validation_df.index[validation_df['Consensus'] == 0],
+           validation_df['Close'][validation_df['Consensus'] == 0],
+           marker='v', color='red', label='Sell Signal', alpha=0.8)
+
+ax.set_title("SPY Validation Period with Consensus Buy/Sell Signals")
+ax.set_xlabel("Date")
+ax.set_ylabel("Price")
+ax.legend()
+st.pyplot(fig)
+
+# Step 9: Backtest Performance
+st.subheader("📈 Backtest Performance")
+
+validation_df['Cumulative BuyHold'] = (1 + validation_df['Market Returns']).cumprod()
+validation_df['Cumulative Strategy'] = (1 + validation_df['Strategy Returns'].fillna(0)).cumprod()
+
+fig2, ax2 = plt.subplots(figsize=(10, 5))
+ax2.plot(validation_df.index, validation_df['Cumulative BuyHold'], label="Buy & Hold", color='black')
+ax2.plot(validation_df.index, validation_df['Cumulative Strategy'], label="Consensus Strategy", color='orange')
+ax2.set_title("Cumulative Returns: Consensus vs Buy & Hold")
+ax2.set_xlabel("Date")
+ax2.set_ylabel("Cumulative Growth")
+ax2.legend()
+st.pyplot(fig2)
+
+st.write("Final Returns:")
+st.write(f"Buy & Hold: **{validation_df['Cumulative BuyHold'].iloc[-1]-1:.2%}**")
+st.write(f"Consensus Strategy: **{validation_df['Cumulative Strategy'].iloc[-1]-1:.2%}**")
+
+# Optional: ROC curve for Model 1
+st.subheader("📐 ROC Curve (Model 1)")
+y_pred_prob = model1.predict_proba(X_validation_scaled)[:, 1]
+fpr, tpr, _ = roc_curve(Y_validation_1, y_pred_prob)
+roc_auc = roc_auc_score(Y_validation_1, y_pred_prob)
+
+fig3, ax3 = plt.subplots()
+ax3.plot(fpr, tpr, label=f'ROC curve (AUC = {roc_auc:.2f})')
+ax3.plot([0, 1], [0, 1], 'k--')
+ax3.set_xlim([0.0, 1.0])
+ax3.set_ylim([0.0, 1.05])
+ax3.set_xlabel('False Positive Rate')
+ax3.set_ylabel('True Positive Rate')
+ax3.set_title('Receiver Operating Characteristic (Model 1)')
+ax3.legend(loc="lower right")
+st.pyplot(fig3)
