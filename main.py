@@ -14,7 +14,7 @@ st.title("📈 Bitcoin Tomorrow Predictor")
 st.write("Logistic Regression models on Bitcoin data (3 years).")
 
 # Step 1: Data Collection
-spy = yf.Ticker("SPY")
+
 # data = spy.history(period="3y")
 data = yf.download("BTC-USD", period="3y")
 
